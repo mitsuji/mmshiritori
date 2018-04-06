@@ -97,7 +97,7 @@ shiritori wordA wordCountA hr = loop hr (kc 'り')
         update hr h =
           let
             Just c = lookup h hr
-            hr' = (h,c-1):(filter (\(h',_)-> h'/=h ) hr)
+            hr' = (h,c-1):(filter (\(h',_)-> h'/=h) hr)
           in sortOn (Down . snd) hr'
 
 
@@ -127,18 +127,15 @@ load wordA wordCountA = do
     aggregate :: IO WordRanking
     aggregate  = do
       ((b,_),(e,_)) <- getBounds wordCountA
-      sortOn (Down . snd) <$> mapM headCount [b..e]
+      sortOn (Down . snd) <$> mapM count [b..e]
       where
-        headCount :: KanaCode -> IO (KanaCode,Count)
-        headCount h = do
+        count :: KanaCode -> IO (KanaCode,Count)
+        count h = do
           ((_,b),(_,e)) <- getBounds wordCountA
-          count <- foldM add' 0 [b..e]
-          return (h,count)
+          (\c -> (h, c)) <$> foldM add 0 [b..e]
           where
-            add' :: Count -> KanaCode -> IO Count
-            add' acc l = do
-              c <- readArray wordCountA (h,l)
-              return $ acc + c
+            add :: Count -> KanaCode -> IO Count
+            add acc l = ((+)acc) <$> readArray wordCountA (h,l)
 
 
 
