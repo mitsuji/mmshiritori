@@ -10,8 +10,8 @@ import qualified Data.Text.IO as T
 
 import System.IO (stdin,Handle,hIsEOF)
 
-import qualified Data.Array.IO as IOA
-import Data.Array.MArray (MArray(..),newArray,readArray,writeArray,getBounds)
+import Data.Array.IO (IOArray(..),IOUArray(..))
+import Data.Array.MArray (newArray,readArray,writeArray,getBounds)
 
 import Data.Ord (Down(..))
 import Data.List (sortOn)
@@ -20,12 +20,10 @@ import Control.Monad.State (liftIO,StateT(..),evalStateT,get,modify)
 
 
 -- [Memo]
--- 小さい文字が最後に来たら、大きい文字とみなす
+-- 小さい文字が最後に来たら、大きい文字とみなす 'ぁ', 'ぃ', 'っ',...
 -- 長音が最後に来たら、一つ前の文字を最後とみなす 'ー', '〜'
--- 'ん' でおわる -> 'ん'で始まる単語がないからOK?
--- 'ゔ' でおわる -> Unicode にあるので有効?
--- 副詞 とか 形容詞 が辞書にあるけど?
--- 重複した項目が辞書にあるけど?
+-- 'ん' で始まる/終わる -> 辞書にあるならOK
+-- 'ゔ' で始まる/終わる -> Unicode にあるので有効
 -- しりとりの最初は 'り' から?
 
 -- 元データの処理
@@ -36,25 +34,26 @@ import Control.Monad.State (liftIO,StateT(..),evalStateT,get,modify)
 
 -- 0x3041 -- 'ぁ'
 -- 0x3042 -- 'あ'
+-- ...
 -- 0x3093 -- 'ん'
 -- 0x3094 -- 'ゔ'
 
 type Word'    = T.Text -- 単語
-type Kana     = T.Text -- 単語の読み(ひらがな)
-type KanaCode = Int    -- かな番
+type Kana     = T.Text -- かな(単語の読み)
+type KanaCode = Int    -- かな番号 ['あ':0, 'ぃ':1, 'い':2, ... ,'を':80, 'ん':81, 'ゔ':82]
 type Index    = Int 
 type Count    = Int
 
-type WordA       = IOA.IOArray  (KanaCode,KanaCode,Index) (Word',Kana)  -- 単語の配列の配列(index:(先頭,終端,index))
-type WordCountA  = IOA.IOUArray (KanaCode,KanaCode) Count               -- 未使用単語数の配列(index:(先頭,終端))
-type WordRanking = [(KanaCode,Count)]                                   -- 先頭毎の単語数ランキング, (かな番,単語数) のリスト(多い順)
+type WordA       = IOArray  (KanaCode,KanaCode,Index) (Word',Kana) -- 単語帳 (先頭文字,末尾文字,index) -> (単語,かな)
+type WordCountA  = IOUArray (KanaCode,KanaCode) Count              -- 単語カウンタ (先頭文字,末尾文字) -> 残数
+type WordRanking = [(KanaCode,Count)]                              -- 単語残数ランキング (先頭文字,残数)の多い順リスト
 
 
 main :: IO ()
 main = do
   wordA      <- (newArray ((0,0,0),(kc 'ゔ',kc 'ゔ',800)) ("","")) :: IO WordA
   wordCountA <- (newArray ((0,0),(kc 'ゔ',kc 'ゔ')) 0) :: IO WordCountA
-  headRanks  <- load wordA wordCountA  -- 単語を配列にロード,先頭文字毎のランキングを集計
+  headRanks  <- load wordA wordCountA  -- 単語帳と単語カウンタを読み込み,単語残数ランキングを集計する
   shiritori wordA wordCountA headRanks -- しりとりをする
 
 
@@ -63,34 +62,36 @@ shiritori :: WordA -> WordCountA -> WordRanking -> IO ()
 shiritori wordA wordCountA hr = evalStateT (loop (kc 'り')) hr
   where
     -- しりとりをする
-    -- ランキング -> 先頭文字
+    -- :: 先頭文字 -> StateT 残数ランキング IO ()
     loop :: KanaCode -> StateT WordRanking IO ()
     loop h = do
-      m <- next h  -- 次の単語の取得
+      m <- next h -- 次の単語を取得する
       case m of
         Just ((word,kana),h') -> do
           liftIO $ T.putStrLn $ word <> "（" <> kana <> "）"
           loop h'
-        Nothing -> return () -- 終了
+        Nothing -> return ()
       
-    -- 次の単語の取得とランキング更新
-    -- ランキング -> 先頭文字 -> IO (Maybe (単語,終端文字,新ランキング))
+    -- 次の単語とその末尾文字を取得し、残数ランキングを更新する
+    -- :: 先頭文字 -> StateT 残数ランキング IO (Maybe (単語,末尾文字))
     next :: KanaCode -> StateT WordRanking IO (Maybe ((Word',Kana),KanaCode))
-    next h = get >>= (\hr -> liftIO $ f hr) >>= (\m -> (modify update) >> return m)
+    next h =
+      -- 残数ランキングを get >>= 次の単語を取得 >>= 新残数ランキングを put >>= return
+      get >>= (\hr -> liftIO $ f hr) >>= (\m -> (modify update) >> return m)
       where
         -- 次の単語の取得
-        -- 部分ランキング -> IO (Maybe (単語,終端文字))
+        -- :: 残数ランキング -> IO (Maybe (単語,末尾文字))
         f :: WordRanking -> IO (Maybe ((Word',Kana),KanaCode))
         f ((l,_):hr') = do
-          wc <- readArray wordCountA (h,l) -- 最上ランクの単語が残っているかチェック
-          if wc > 0
+          wc <- readArray wordCountA (h,l)
+          if wc > 0 -- 最上ランクの単語が残っているかチェック
             then do
-              txt <- readArray wordA (h,l,wc-1)   -- 末尾の単語を取り出す
-              writeArray wordCountA (h,l) (wc-1)  -- 1個使用済にする
+              txt <- readArray wordA (h,l,wc-1)   -- 単語帳から未使用の単語を取得
+              writeArray wordCountA (h,l) (wc-1)  -- 単語カウンタを1個使用済にする
               return $ Just (txt,l)
             else
               if null hr'
-                 then return Nothing  -- ランキングが最後に達したら終わり
+                 then return Nothing  -- 残数ランキングがなくなったら終了
                  else f hr' -- 次のランクをチェック
 
         -- 使った先頭文字の残数を減らしてランキングを更新
@@ -106,11 +107,11 @@ shiritori wordA wordCountA hr = evalStateT (loop (kc 'り')) hr
 
 load :: WordA -> WordCountA -> IO WordRanking
 load wordA wordCountA = do
-  loop      -- 単語を配列にロード
-  aggregate -- 先頭毎のランキングを集計
+  loop      -- 単語帳と単語カウンタを読み込む
+  aggregate -- 単語残数ランキングを集計
   where
-    
-    -- 単語を配列にロード
+
+    -- 単語帳と単語カウンタを標準入力から読み込む
     loop :: IO ()
     loop = do
       eof <- hIsEOF stdin
@@ -125,7 +126,7 @@ load wordA wordCountA = do
            writeArray wordCountA (h,l) (c+1)
            loop
 
-    -- ランキングを集計
+    -- 単語カウンタから単語残数ランキングを集計
     aggregate :: IO WordRanking
     aggregate  = do
       ((b,_),(e,_)) <- getBounds wordCountA
