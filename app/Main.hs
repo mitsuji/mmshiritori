@@ -16,6 +16,8 @@ import Data.Array.MArray (MArray(..),newArray,readArray,writeArray,getBounds)
 import Data.Ord (Down(..))
 import Data.List (sortOn)
 
+import Control.Monad.State (liftIO,StateT(..),evalStateT,get,modify)
+
 
 -- [Memo]
 -- 小さい文字が最後に来たら、大きい文字とみなす
@@ -58,23 +60,23 @@ main = do
 
 
 shiritori :: WordA -> WordCountA -> WordRanking -> IO ()
-shiritori wordA wordCountA hr = loop hr (kc 'り')
+shiritori wordA wordCountA hr = evalStateT (loop (kc 'り')) hr
   where
     -- しりとりをする
     -- ランキング -> 先頭文字
-    loop :: WordRanking -> KanaCode -> IO ()
-    loop hr h = do
-      m <- next hr h  -- 次の単語の取得
+    loop :: KanaCode -> StateT WordRanking IO ()
+    loop h = do
+      m <- next h  -- 次の単語の取得
       case m of
-        Just ((word,kana),h',hr') -> do
-          T.putStrLn $ word <> "（" <> kana <> "）"
-          loop hr' h'
+        Just ((word,kana),h') -> do
+          liftIO $ T.putStrLn $ word <> "（" <> kana <> "）"
+          loop h'
         Nothing -> return () -- 終了
-
+      
     -- 次の単語の取得とランキング更新
     -- ランキング -> 先頭文字 -> IO (Maybe (単語,終端文字,新ランキング))
-    next :: WordRanking -> KanaCode -> IO (Maybe ((Word',Kana),KanaCode,WordRanking))
-    next hr h = f hr >>= (\m -> return $ (\(txt,l) -> (txt,l,(update hr h))) <$> m)
+    next :: KanaCode -> StateT WordRanking IO (Maybe ((Word',Kana),KanaCode))
+    next h = get >>= (\hr -> liftIO $ f hr) >>= (\m -> (modify update) >> return m)
       where
         -- 次の単語の取得
         -- 部分ランキング -> IO (Maybe (単語,終端文字))
@@ -93,8 +95,8 @@ shiritori wordA wordCountA hr = loop hr (kc 'り')
 
         -- 使った先頭文字の残数を減らしてランキングを更新
         -- ランキング -> 使った先頭文字 -> 新ランキング
-        update :: WordRanking -> KanaCode -> WordRanking
-        update hr h =
+        update :: WordRanking -> WordRanking
+        update hr =
           let
             Just c = lookup h hr
             hr' = (h,c-1):(filter (\(h',_)-> h'/=h) hr)
