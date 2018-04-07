@@ -94,8 +94,7 @@ shiritori wordA wordCountA = evalStateT (loop (kc 'り'))
                  then return Nothing  -- 残数ランキングがなくなったら終了
                  else f hr' -- 次のランクをチェック
 
-        -- 使った先頭文字の残数を減らしてランキングを更新
-        -- ランキング -> 使った先頭文字 -> 新ランキング
+        -- 取得した単語の先頭文字の残数を減らして残数ランキングを更新
         update :: WordRanking -> WordRanking
         update hr =
           let
