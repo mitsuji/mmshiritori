@@ -59,7 +59,7 @@ main = do
 
 
 shiritori :: WordA -> WordCountA -> WordRanking -> IO ()
-shiritori wordA wordCountA hr = evalStateT (loop (kc 'り')) hr
+shiritori wordA wordCountA = evalStateT (loop (kc 'り'))
   where
     -- しりとりをする
     -- :: 先頭文字 -> StateT 残数ランキング IO ()
@@ -76,7 +76,7 @@ shiritori wordA wordCountA hr = evalStateT (loop (kc 'り')) hr
     -- :: 先頭文字 -> StateT 残数ランキング IO (Maybe (単語,末尾文字))
     next :: KanaCode -> StateT WordRanking IO (Maybe ((Word',Kana),KanaCode))
     next h =
-      -- 残数ランキングを get >>= 次の単語を取得 >>= 新残数ランキングを put >>= return
+      -- 残数ランキングを get >>= 次の単語を取得 >>= 残数ランキングを modify >>= return
       get >>= (\hr -> liftIO $ f hr) >>= (\m -> (modify update) >> return m)
       where
         -- 次の単語の取得
