@@ -18,6 +18,7 @@ import Data.List (sortOn)
 
 import Control.Monad.State (liftIO,StateT(..),evalStateT,get,modify)
 
+import Data.Time (getCurrentTime,diffUTCTime)
 
 -- [Memo]
 -- 小さい文字が最後に来たら、大きい文字とみなす 'ぁ', 'ぃ', 'っ',...
@@ -54,8 +55,10 @@ main = do
   wordA      <- (newArray ((0,0,0),(kc 'ゔ',kc 'ゔ',800)) ("","")) :: IO WordA
   wordCountA <- (newArray ((0,0),(kc 'ゔ',kc 'ゔ')) 0) :: IO WordCountA
   headRanks  <- load wordA wordCountA  -- 単語帳と単語カウンタを読み込み,単語残数ランキングを集計する
+--  b <- getCurrentTime
   shiritori wordA wordCountA headRanks -- しりとりをする
-
+--  e <- getCurrentTime
+--  print $ diffUTCTime e b
 
 
 shiritori :: WordA -> WordCountA -> WordRanking -> IO ()
@@ -98,8 +101,7 @@ shiritori wordA wordCountA = evalStateT (loop (kc 'り'))
         update :: WordRanking -> WordRanking
         update hr =
           let
-            Just c = lookup h hr
-            hr' = (h,c-1):(filter (\(h',_)-> h'/=h) hr)
+            hr' = fmap (\(h',c) -> if h'==h then (h',c-1) else (h',c)) hr
           in sortOn (Down . snd) hr'
 
 
