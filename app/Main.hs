@@ -7,6 +7,9 @@ import Control.Monad (foldM)
 
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import qualified Data.Text.Lazy as LT
+import qualified Data.Text.Lazy.IO as LT
+import qualified Data.Text.Lazy.Builder as LTB
 
 import System.IO (stdin,Handle,hIsEOF)
 
@@ -16,7 +19,7 @@ import Data.Array.MArray (newArray,readArray,writeArray,getBounds)
 import Data.Ord (Down(..))
 import Data.List (sortOn)
 
-import Control.Monad.State (liftIO,StateT(..),evalStateT,get,modify)
+import Control.Monad.RWS (liftIO,RWST(..),evalRWST,get,modify,tell)
 
 import Data.Time (getCurrentTime,diffUTCTime)
 
@@ -55,29 +58,35 @@ main = do
   wordA      <- (newArray ((0,0,0),(kc 'ゔ',kc 'ゔ',800)) ("","")) :: IO WordA
   wordCountA <- (newArray ((0,0),(kc 'ゔ',kc 'ゔ')) 0) :: IO WordCountA
   headRanks  <- load wordA wordCountA  -- 単語帳と単語カウンタを読み込み,単語残数ランキングを集計する
---  b <- getCurrentTime
-  shiritori wordA wordCountA headRanks -- しりとりをする
---  e <- getCurrentTime
---  print $ diffUTCTime e b
+  b <- getCurrentTime
+--  LT.putStr =<< LTB.toLazyText <$> shiritori wordA wordCountA headRanks -- しりとりをする
+  txt <- LTB.toLazyText <$> shiritori wordA wordCountA headRanks -- しりとりをする
+  e <- getCurrentTime
+  LT.putStr txt
+  print $ diffUTCTime e b
 
 
-shiritori :: WordA -> WordCountA -> WordRanking -> IO ()
-shiritori wordA wordCountA = evalStateT (loop (kc 'り'))
+shiritori :: WordA -> WordCountA -> WordRanking -> IO LTB.Builder
+shiritori wordA wordCountA headRanks = snd <$> evalRWST (loop (kc 'り')) () headRanks
   where
     -- しりとりをする
-    -- :: 先頭文字 -> StateT 残数ランキング IO ()
-    loop :: KanaCode -> StateT WordRanking IO ()
+    -- :: 先頭文字 -> RWST () LTB.Builder 残数ランキング IO ()
+    loop :: KanaCode -> RWST () LTB.Builder WordRanking IO ()
     loop h = do
       m <- next h -- 次の単語を取得する
       case m of
         Just ((word,kana),h') -> do
-          liftIO $ T.putStrLn $ word <> "（" <> kana <> "）"
+          tell $ LTB.fromText word
+          tell $ LTB.singleton '（'
+          tell $ LTB.fromText kana
+          tell $ LTB.singleton '）'
+          tell $ LTB.singleton '\n'
           loop h'
         Nothing -> return ()
       
     -- 次の単語とその末尾文字を取得し、残数ランキングを更新する
-    -- :: 先頭文字 -> StateT 残数ランキング IO (Maybe (単語,末尾文字))
-    next :: KanaCode -> StateT WordRanking IO (Maybe ((Word',Kana),KanaCode))
+    -- :: 先頭文字 -> RWST () LTB.Builder 残数ランキング IO (Maybe (単語,末尾文字))
+    next :: KanaCode -> RWST () LTB.Builder WordRanking IO (Maybe ((Word',Kana),KanaCode))
     next h =
       -- 残数ランキングを get >>= 次の単語を取得 >>= 残数ランキングを modify >>= return
       get >>= (\hr -> liftIO $ f hr) >>= (\m -> (modify update) >> return m)
